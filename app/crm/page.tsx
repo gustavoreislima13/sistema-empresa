@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { Search, Plus, Trash2, User, Phone, Mail, Edit, Save, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Search, Plus, Trash2, User, Phone, Mail, Edit, Save, X, Loader2 } from "lucide-react";
+// Importamos a conexão que criamos
+import { supabase } from "../lib/supabase"; 
 
 type Cliente = {
   id: number;
@@ -9,15 +11,12 @@ type Cliente = {
   cpf: string;
   celular: string;
   email: string;
-  dataCadastro: string;
+  created_at?: string; // Supabase cria isso automaticamente
 };
 
 export default function CRMPage() {
-  // Lista inicial
-  const [clientes, setClientes] = useState<Cliente[]>([
-    { id: 1, nome: "Carlos Silva", cpf: "123.456.789-00", celular: "11 99999-0000", email: "carlos@email.com", dataCadastro: "2024-01-15" },
-    { id: 2, nome: "Ana Pereira", cpf: "987.654.321-11", celular: "11 98888-1111", email: "ana@email.com", dataCadastro: "2024-02-20" },
-  ]);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Estado do Formulário
   const [form, setForm] = useState<Partial<Cliente>>({});
@@ -25,33 +24,62 @@ export default function CRMPage() {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [busca, setBusca] = useState("");
 
-  // Função de Busca (Nome ou CPF)
-  const clientesFiltrados = clientes.filter(c => 
-    c.nome.toLowerCase().includes(busca.toLowerCase()) || 
-    c.cpf.includes(busca)
-  );
+  // 1. BUSCAR DADOS DO SUPABASE (SELECT)
+  const fetchClientes = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('clientes')
+      .select('*')
+      .order('id', { ascending: false });
 
-  const salvarCliente = () => {
+    if (error) {
+      console.error('Erro ao buscar clientes:', error);
+      alert('Erro ao carregar clientes.');
+    } else {
+      setClientes(data || []);
+    }
+    setLoading(false);
+  };
+
+  // Carregar dados ao iniciar a página
+  useEffect(() => {
+    fetchClientes();
+  }, []);
+
+  // 2. SALVAR OU ATUALIZAR (INSERT / UPDATE)
+  const salvarCliente = async () => {
     if (!form.nome || !form.cpf) return alert("Nome e CPF são obrigatórios");
 
+    const dadosCliente = {
+      nome: form.nome,
+      cpf: form.cpf,
+      celular: form.celular || "",
+      email: form.email || "",
+    };
+
     if (modoEdicao) {
-      // Editar Existente
-      setClientes(clientes.map(c => c.id === modoEdicao ? { ...c, ...form } as Cliente : c));
-      setModoEdicao(null);
+      // Editar Existente no Supabase
+      const { error } = await supabase
+        .from('clientes')
+        .update(dadosCliente)
+        .eq('id', modoEdicao);
+
+      if (error) return alert("Erro ao atualizar: " + error.message);
+
     } else {
-      // Criar Novo
-      const novo: Cliente = {
-        id: Date.now(),
-        nome: form.nome!,
-        cpf: form.cpf!,
-        celular: form.celular || "",
-        email: form.email || "",
-        dataCadastro: new Date().toISOString().split("T")[0] // Data de hoje
-      };
-      setClientes([...clientes, novo]);
+      // Criar Novo no Supabase
+      const { error } = await supabase
+        .from('clientes')
+        .insert([dadosCliente]);
+
+      if (error) return alert("Erro ao criar: " + error.message);
     }
+
+    // Limpar e Recarregar
     setForm({});
+    setModoEdicao(null);
     setMostrarForm(false);
+    fetchClientes(); // Atualiza a lista na tela
   };
 
   const prepararEdicao = (cliente: Cliente) => {
@@ -60,11 +88,27 @@ export default function CRMPage() {
     setMostrarForm(true);
   };
 
-  const removerCliente = (id: number) => {
-    if(confirm("Tem certeza que deseja excluir este cliente?")) {
-      setClientes(clientes.filter(c => c.id !== id));
+  // 3. REMOVER (DELETE)
+  const removerCliente = async (id: number) => {
+    if(confirm("Tem certeza que deseja excluir este cliente do banco de dados?")) {
+      const { error } = await supabase
+        .from('clientes')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        alert("Erro ao apagar");
+      } else {
+        fetchClientes(); // Atualiza a lista
+      }
     }
   };
+
+  // Função de Busca (Front-end filtering)
+  const clientesFiltrados = clientes.filter(c => 
+    c.nome.toLowerCase().includes(busca.toLowerCase()) || 
+    (c.cpf && c.cpf.includes(busca))
+  );
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -80,7 +124,7 @@ export default function CRMPage() {
 
       {/* Formulário */}
       {mostrarForm && (
-        <div className="bg-white p-6 rounded-xl shadow-md border border-blue-100 mb-8">
+        <div className="bg-white p-6 rounded-xl shadow-md border border-blue-100 mb-8 animate-in slide-in-from-top-2">
           <h3 className="font-bold text-slate-700 mb-4">{modoEdicao ? "Editar Cliente" : "Cadastrar Cliente"}</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <input placeholder="Nome Completo" className="border p-2 rounded" value={form.nome || ""} onChange={e => setForm({...form, nome: e.target.value})} />
@@ -89,7 +133,7 @@ export default function CRMPage() {
             <input placeholder="Email" className="border p-2 rounded" value={form.email || ""} onChange={e => setForm({...form, email: e.target.value})} />
           </div>
           <button onClick={salvarCliente} className="mt-4 bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 w-full md:w-auto flex items-center justify-center gap-2">
-            <Save size={18}/> Salvar
+            <Save size={18}/> Salvar no Banco
           </button>
         </div>
       )}
@@ -106,15 +150,25 @@ export default function CRMPage() {
         />
       </div>
 
+      {/* Loading State */}
+      {loading && (
+        <div className="flex justify-center p-10 text-gray-500">
+          <Loader2 className="animate-spin mr-2"/> Carregando dados...
+        </div>
+      )}
+
       {/* Lista */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {clientesFiltrados.map((cliente) => (
+        {!loading && clientesFiltrados.map((cliente) => (
           <div key={cliente.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm relative group hover:shadow-md transition-all">
             <div className="flex items-start justify-between mb-4">
               <div className="bg-blue-100 p-3 rounded-full text-blue-600">
                 <User size={24} />
               </div>
-              <span className="text-xs text-gray-400">Desde: {cliente.dataCadastro}</span>
+              {/* Data formatada */}
+              <span className="text-xs text-gray-400">
+                {cliente.created_at ? new Date(cliente.created_at).toLocaleDateString('pt-BR') : '-'}
+              </span>
             </div>
             
             <h3 className="font-bold text-lg text-slate-800">{cliente.nome}</h3>
